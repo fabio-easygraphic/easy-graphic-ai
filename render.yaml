@@ -1,0 +1,10 @@
+services:
+  - type: cron
+    name: easy-graphic-ai
+    runtime: python
+    schedule: "0 8 * * *"
+    buildCommand: pip install -r requirements.txt
+    startCommand: python easy_graphic_ai.py
+    envVars:
+      - key: OUTSCRAPER_KEY
+        sync: false
