@@ -246,10 +246,14 @@ def cerca_attivita(nicchia, citta, limit=25):
         r = requests.get('https://api.outscraper.com/maps/search-v3',
             params={'query': query, 'limit': limit, 'async': True},
             headers={'X-API-KEY': OUTSCRAPER_KEY}, timeout=30)
-        if r.status_code != 200:
+        if r.status_code not in [200, 202]:
             print(f'  Errore Outscraper: {r.status_code}')
             return []
         request_id = r.json().get('id', '')
+        if not request_id:
+            # Risposta sincrona diretta
+            data = r.json().get('data', [[]])
+            return data[0] if data else []
         for attempt in range(12):
             time.sleep(10)
             r2 = requests.get(f'https://api.outscraper.com/requests/{request_id}',
