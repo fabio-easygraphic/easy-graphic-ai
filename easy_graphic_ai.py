@@ -165,6 +165,39 @@ def gia_presente(nome, email):
             pass
     return False
 
+
+# ── ESTRAI EMAIL DAL SITO ─────────────────────────────────────────
+def estrai_email_da_sito(url):
+    """Cerca email nel sito web dell'attività."""
+    if not url or not url.startswith('http'):
+        return ''
+    try:
+        import re
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (compatible; EasyGraphic/1.0)',
+            'Accept': 'text/html'
+        }
+        r = requests.get(url, headers=headers, timeout=8, allow_redirects=True)
+        if r.status_code != 200:
+            return ''
+        testo = r.text[:50000]  # primi 50kb
+        # Cerca pattern email
+        emails = re.findall(r'[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}', testo)
+        # Filtra email generiche/spam
+        escludi = ['noreply', 'no-reply', 'wordpress', 'sentry', 'example',
+                   'wix', 'squarespace', 'google', 'facebook', 'instagram',
+                   'schema', 'jquery', 'bootstrap', 'cloudflare']
+        for email in emails:
+            email_low = email.lower()
+            if any(e in email_low for e in escludi):
+                continue
+            if len(email) > 60:
+                continue
+            return email.lower()
+    except Exception as e:
+        pass
+    return ''
+
 def salva_pending(attivita, membro_id, nicchia, citta, email_inviata):
     """Salva in leads_pending con timestamp. Dopo 24h passa a emaillist."""
     nome      = attivita.get('name', '')
@@ -308,8 +341,15 @@ def run():
             if gia_presente(nome, email):
                 print(f'  ⏭  Già presente: {nome}')
                 continue
-            # Manda email se c'è l'indirizzo
+            # Cerca email: prima da Outscraper, poi dal sito
             email_ok = False
+            if not (email and '@' in email):
+                sito = a.get('website', '') or a.get('site', '')
+                if sito:
+                    print(f'  🔍 Cerco email su sito: {sito[:50]}')
+                    email = estrai_email_da_sito(sito)
+                    if email:
+                        print(f'  📧 Email trovata: {email}')
             if email and '@' in email:
                 email_ok = manda_email(email, nome)
                 if email_ok:
