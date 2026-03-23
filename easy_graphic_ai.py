@@ -47,11 +47,41 @@ ALL_CITTA = CITTA_NORD + CITTA_CENTRO + CITTA_SUD
 LEADS_PER_MEMBRO = 25
 
 # ── EMAIL ─────────────────────────────────────────────────────────
-def build_email(nome_attivita):
-    oggetto = f"Easy Graphic — Una proposta per {nome_attivita}"
+# Saluto per nicchia quando non c'è un nome personale
+SALUTO_NICCHIA = {
+    'parrucchieri':    'ragazzi e ragazze',
+    'centro estetico': 'ragazze',
+    'consulenti':      'ragazzi',
+    'impresa edile':   'ragazzi',
+}
+
+def nome_breve(nome_attivita, nicchia=''):
+    """Estrae il nome breve. Se è un nome generico di attività, usa il saluto per nicchia."""
+    import re
+    n = nome_attivita.strip()
+    # Prendi solo la prima parte prima di - | / (
+    n = re.split(r'[-|/(]', n)[0].strip()
+    parole = n.split()
+    # Parole che indicano un nome generico di attività (non un nome proprio)
+    parole_generiche = ['centro','studio','impresa','salone','saloon','hair','beauty',
+                        'estetica','estetico','parrucchiere','parrucchieri','consulente',
+                        'consulenti','edile','costruzioni','srl','snc','srls','spa','group',
+                        'team','&','and','di','del','della','lo','la','il','i','le']
+    prima = parole[0].lower() if parole else ''
+    # Se la prima parola è generica, usa saluto nicchia
+    if prima in parole_generiche or len(parole) > 3:
+        return SALUTO_NICCHIA.get(nicchia, 'ragazzi')
+    # Altrimenti usa le prime 2 parole max
+    if len(parole) > 2:
+        n = ' '.join(parole[:2])
+    return n.strip()
+
+def build_email(nome_attivita, nicchia=''):
+    nome = nome_breve(nome_attivita, nicchia)
+    oggetto = f"Easy Graphic — Una proposta per {nome}"
     corpo_html = f"""
 <div style="font-family:Arial,sans-serif;max-width:560px;margin:0 auto;color:#222;font-size:15px;line-height:1.7">
-  <p>Ciao <b>{nome_attivita}</b>,</p>
+  <p>Ciao <b>{nome}</b>,</p>
 
   <p>Ci siamo imbattuti nella tua attività mentre cercavamo realtà interessanti nella zona — e la tua ci ha colpito.
   Si vede la cura che ci hai messo.</p>
@@ -75,7 +105,7 @@ def build_email(nome_attivita):
   </p>
 </div>
 """
-    corpo_testo = f"""Ciao {nome_attivita},
+    corpo_testo = f"""Ciao {nome},
 
 Ci siamo imbattuti nella tua attività mentre cercavamo realtà interessanti nella zona — e la tua ci ha colpito. Si vede la cura che ci hai messo.
 
@@ -94,7 +124,7 @@ Sito: {LINK_SITO}
 """
     return oggetto, corpo_html, corpo_testo
 
-def manda_email(destinatario, nome_attivita):
+def manda_email(destinatario, nome_attivita, nicchia=''):
     """Manda email al potenziale cliente. Ritorna True se successo."""
     if not GMAIL_USER or not GMAIL_PASSWORD:
         print(f'  ⚠️  Gmail non configurato, skip email per {destinatario}')
@@ -103,7 +133,7 @@ def manda_email(destinatario, nome_attivita):
         return False
 
     try:
-        oggetto, corpo_html, corpo_testo = build_email(nome_attivita)
+        oggetto, corpo_html, corpo_testo = build_email(nome_attivita, nicchia)
         msg = MIMEMultipart('alternative')
         msg['Subject'] = oggetto
         msg['From']    = GMAIL_USER
@@ -351,7 +381,7 @@ def run():
                     if email:
                         print(f'  📧 Email trovata: {email}')
             if email and '@' in email:
-                email_ok = manda_email(email, nome)
+                email_ok = manda_email(email, nome, nicchia)
                 if email_ok:
                     totale_email += 1
                     time.sleep(2)  # pausa tra email
