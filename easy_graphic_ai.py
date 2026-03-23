@@ -106,14 +106,14 @@ def manda_email(destinatario, nome_attivita):
         oggetto, corpo_html, corpo_testo = build_email(nome_attivita)
         msg = MIMEMultipart('alternative')
         msg['Subject'] = oggetto
-        msg['From']    = f'Easy Graphic <{GMAIL_USER}>'
+        msg['From']    = GMAIL_USER
         msg['To']      = destinatario
         msg.attach(MIMEText(corpo_testo, 'plain', 'utf-8'))
         msg.attach(MIMEText(corpo_html, 'html', 'utf-8'))
 
         with smtplib.SMTP_SSL('smtp.gmail.com', 465) as smtp:
             smtp.login(GMAIL_USER, GMAIL_PASSWORD)
-            smtp.sendmail(GMAIL_USER, destinatario, msg.as_string())
+            smtp.sendmail(GMAIL_USER, destinatario, msg.as_bytes())
 
         print(f'  ✅ Email inviata a {destinatario}')
         return True
