@@ -17,9 +17,9 @@ FIREBASE_PROJECT = 'easy-graphic-8a7eb'
 FIREBASE_URL    = f'https://firestore.googleapis.com/v1/projects/{FIREBASE_PROJECT}/databases/(default)/documents'
 
 # Link da aggiornare quando pronti
-LINK_SITO      = os.environ.get('LINK_SITO', '[LINK SITO - coming soon]')
-LINK_BROCHURE  = os.environ.get('LINK_BROCHURE', '[LINK BROCHURE - coming soon]')
-WHATSAPP_URL   = 'https://wa.me/39351994 3497'
+LINK_SITO      = os.environ.get('LINK_SITO', 'https://easy-graphic.it')
+LINK_BROCHURE  = os.environ.get('LINK_BROCHURE', 'https://drive.google.com/file/d/1x8QU21kibsTGzoaBCzfY9ZHmu-_s9Sb9/view?usp=sharing')
+WHATSAPP_URL   = 'https://wa.me/393519943497'
 
 # Nicchie per collaboratore
 NICCHIE = {
@@ -80,47 +80,54 @@ def build_email(nome_attivita, nicchia=''):
     nome = nome_breve(nome_attivita, nicchia)
     oggetto = f"Easy Graphic — Una proposta per {nome}"
     corpo_html = f"""
-<div style="font-family:Arial,sans-serif;max-width:560px;margin:0 auto;color:#222;font-size:15px;line-height:1.7">
+<div style="font-family:Arial,sans-serif;max-width:560px;margin:0 auto;color:#222;font-size:15px;line-height:1.8">
   <p>Ciao <b>{nome}</b>,</p>
 
   <p>Ci siamo imbattuti nella tua attività mentre cercavamo realtà interessanti nella zona — e la tua ci ha colpito.
-  Si vede la cura che ci hai messo.</p>
+  Si vede la cura che ci hai messo e la qualità del lavoro, soprattutto vedendo i tuoi competitor.</p>
 
   <p>L'unica cosa è che una bella attività senza la comunicazione giusta rischia di restare invisibile —
   e di perdere clienti che avrebbero scelto te.</p>
 
-  <p>Ti lascio la nostra brochure, magari può essere uno spunto interessante.<br>
-  👉 <a href="{LINK_BROCHURE}">Scarica la brochure</a></p>
+  <p>Ti mando questa email con l'intento di darti una mano per quanto riguarda la parte comunicativa e visiva.</p>
 
-  <p>Se ti va, siamo molto volentieri disponibili per una chiamata conoscitiva — senza impegno,
-  solo per capire se possiamo esserti utili.</p>
+  <p>Ti lascio la nostra brochure e il sito, magari può essere uno spunto interessante, oltre che a capire meglio
+  ciò che facciamo.<br>
+  👉 <a href="{LINK_BROCHURE}" style="color:#1A1DE6;font-weight:600">Scarica la brochure</a> &nbsp;·&nbsp;
+  <a href="{LINK_SITO}" style="color:#1A1DE6;font-weight:600">Visita il sito</a></p>
 
-  <p>A disposizione per qualsiasi cosa, ti ringrazio per il tuo tempo e ti auguro una buona giornata e un buon lavoro!</p>
+  <p>Se ti va, siamo disponibili per una chiamata conoscitiva — senza impegno, per capire se, e in che modo,
+  possiamo darti una mano!</p>
 
-  <p style="margin-top:24px">
-    <b>Fabio — Easy Graphic</b><br>
-    📞 351 994 3497<br>
-    💬 <a href="{WHATSAPP_URL}">WhatsApp diretto</a><br>
-    🌐 <a href="{LINK_SITO}">{LINK_SITO}</a>
+  <p style="margin-top:28px">
+    <b>Fabio</b><br>
+    <b style="color:#1A1DE6">Easy Graphic</b><br><br>
+    📞 <a href="tel:+393519943497" style="color:#222">351 994 3497</a><br>
+    💬 <a href="{WHATSAPP_URL}" style="color:#1A1DE6">WhatsApp diretto</a><br>
+    🌐 <a href="{LINK_SITO}" style="color:#1A1DE6">{LINK_SITO}</a>
   </p>
 </div>
 """
     corpo_testo = f"""Ciao {nome},
 
-Ci siamo imbattuti nella tua attività mentre cercavamo realtà interessanti nella zona — e la tua ci ha colpito. Si vede la cura che ci hai messo.
+Ci siamo imbattuti nella tua attività mentre cercavamo realtà interessanti nella zona — e la tua ci ha colpito. Si vede la cura che ci hai messo e la qualità del lavoro, soprattutto vedendo i tuoi competitor.
 
 L'unica cosa è che una bella attività senza la comunicazione giusta rischia di restare invisibile — e di perdere clienti che avrebbero scelto te.
 
-Ti lascio la nostra brochure, magari può essere uno spunto interessante: {LINK_BROCHURE}
+Ti mando questa email con l'intento di darti una mano per quanto riguarda la parte comunicativa e visiva.
 
-Se ti va, siamo molto volentieri disponibili per una chiamata conoscitiva — senza impegno, solo per capire se possiamo esserti utili.
+Ti lascio la nostra brochure e il sito, magari può essere uno spunto interessante:
+- Brochure: {LINK_BROCHURE}
+- Sito: {LINK_SITO}
 
-A disposizione per qualsiasi cosa, ti ringrazio per il tuo tempo e ti auguro una buona giornata e un buon lavoro!
+Se ti va, siamo disponibili per una chiamata conoscitiva — senza impegno, per capire se, e in che modo, possiamo darti una mano!
 
-Fabio — Easy Graphic
+Fabio
+Easy Graphic
+
 351 994 3497
 WhatsApp: {WHATSAPP_URL}
-Sito: {LINK_SITO}
+{LINK_SITO}
 """
     return oggetto, corpo_html, corpo_testo
 
