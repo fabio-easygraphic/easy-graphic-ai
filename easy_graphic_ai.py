@@ -47,33 +47,14 @@ ALL_CITTA = CITTA_NORD + CITTA_CENTRO + CITTA_SUD
 LEADS_PER_MEMBRO = 25
 
 # ── EMAIL ─────────────────────────────────────────────────────────
-# Saluto per nicchia quando non c'è un nome personale
-SALUTO_NICCHIA = {
-    'parrucchieri':    'ragazzi e ragazze',
-    'centro estetico': 'ragazze',
-    'consulenti':      'ragazzi',
-    'impresa edile':   'ragazzi',
-}
-
 def nome_breve(nome_attivita, nicchia=''):
-    """Estrae il nome breve. Se è un nome generico di attività, usa il saluto per nicchia."""
+    """Estrae il nome breve dell'attività."""
     import re
     n = nome_attivita.strip()
-    # Prendi solo la prima parte prima di - | / (
     n = re.split(r'[-|/(]', n)[0].strip()
     parole = n.split()
-    # Parole che indicano un nome generico di attività (non un nome proprio)
-    parole_generiche = ['centro','studio','impresa','salone','saloon','hair','beauty',
-                        'estetica','estetico','parrucchiere','parrucchieri','consulente',
-                        'consulenti','edile','costruzioni','srl','snc','srls','spa','group',
-                        'team','&','and','di','del','della','lo','la','il','i','le']
-    prima = parole[0].lower() if parole else ''
-    # Se la prima parola è generica, usa saluto nicchia
-    if prima in parole_generiche or len(parole) > 3:
-        return SALUTO_NICCHIA.get(nicchia, 'ragazzi')
-    # Altrimenti usa le prime 2 parole max
-    if len(parole) > 2:
-        n = ' '.join(parole[:2])
+    if len(parole) > 3:
+        n = ' '.join(parole[:3])
     return n.strip()
 
 def build_email(nome_attivita, nicchia=''):
@@ -81,7 +62,7 @@ def build_email(nome_attivita, nicchia=''):
     oggetto = "Comunicazione visiva per la tua attivita"
     corpo_html = f"""
 <div style="font-family:Arial,sans-serif;max-width:560px;margin:0 auto;color:#222;font-size:15px;line-height:1.8">
-  <p>Ciao <b>{nome}</b>,</p>
+  <p>Buongiorno,</p>
 
   <p>Ci siamo imbattuti nella tua attivita mentre cercavamo realta interessanti nella zona — e la tua ci ha colpito.
   Si vede la cura che ci hai messo e la qualita del lavoro, soprattutto vedendo i tuoi competitor.</p>
@@ -107,7 +88,7 @@ def build_email(nome_attivita, nicchia=''):
   </p>
 </div>
 """
-    corpo_testo = f"""Ciao {nome},
+    corpo_testo = f"""Buongiorno,
 
 Ci siamo imbattuti nella tua attivita mentre cercavamo realta interessanti nella zona — e la tua ci ha colpito. Si vede la cura che ci hai messo e la qualita del lavoro, soprattutto vedendo i tuoi competitor.
 
