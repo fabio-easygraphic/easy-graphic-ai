@@ -78,23 +78,22 @@ def nome_breve(nome_attivita, nicchia=''):
 
 def build_email(nome_attivita, nicchia=''):
     nome = nome_breve(nome_attivita, nicchia)
-    oggetto = f"Easy Graphic — Una proposta per {nome}"
+    oggetto = "Comunicazione visiva per la tua attivita"
     corpo_html = f"""
 <div style="font-family:Arial,sans-serif;max-width:560px;margin:0 auto;color:#222;font-size:15px;line-height:1.8">
   <p>Ciao <b>{nome}</b>,</p>
 
-  <p>Ci siamo imbattuti nella tua attività mentre cercavamo realtà interessanti nella zona — e la tua ci ha colpito.
-  Si vede la cura che ci hai messo e la qualità del lavoro, soprattutto vedendo i tuoi competitor.</p>
+  <p>Ci siamo imbattuti nella tua attivita mentre cercavamo realta interessanti nella zona — e la tua ci ha colpito.
+  Si vede la cura che ci hai messo e la qualita del lavoro, soprattutto vedendo i tuoi competitor.</p>
 
-  <p>L'unica cosa è che una bella attività senza la comunicazione giusta rischia di restare invisibile —
+  <p>L'unica cosa e che una bella attivita senza la comunicazione giusta rischia di restare invisibile —
   e di perdere clienti che avrebbero scelto te.</p>
 
   <p>Ti mando questa email con l'intento di darti una mano per quanto riguarda la parte comunicativa e visiva.</p>
 
-  <p>Ti lascio la nostra brochure e il sito, magari può essere uno spunto interessante, oltre che a capire meglio
-  ciò che facciamo.<br>
-  👉 <a href="{LINK_BROCHURE}" style="color:#1A1DE6;font-weight:600">Scarica la brochure</a> &nbsp;·&nbsp;
-  <a href="{LINK_SITO}" style="color:#1A1DE6;font-weight:600">Visita il sito</a></p>
+  <p>Ti lascio il nostro sito, magari puo essere uno spunto interessante, oltre che a capire meglio
+  cio che facciamo.<br>
+  <a href="{LINK_SITO}" style="color:#1A1DE6;font-weight:600">{LINK_SITO}</a></p>
 
   <p>Se ti va, siamo disponibili per una chiamata conoscitiva — senza impegno, per capire se, e in che modo,
   possiamo darti una mano!</p>
@@ -102,35 +101,33 @@ def build_email(nome_attivita, nicchia=''):
   <p style="margin-top:28px">
     <b>Fabio</b><br>
     <b style="color:#1A1DE6">Easy Graphic</b><br><br>
-    📞 <a href="tel:+393519943497" style="color:#222">351 994 3497</a><br>
-    💬 <a href="{WHATSAPP_URL}" style="color:#1A1DE6">WhatsApp diretto</a><br>
-    🌐 <a href="{LINK_SITO}" style="color:#1A1DE6">{LINK_SITO}</a>
+    Tel: <a href="tel:+393519943497" style="color:#222">351 994 3497</a><br>
+    WhatsApp: <a href="{WHATSAPP_URL}" style="color:#1A1DE6">Scrivici direttamente</a><br>
+    Sito: <a href="{LINK_SITO}" style="color:#1A1DE6">{LINK_SITO}</a>
   </p>
 </div>
 """
     corpo_testo = f"""Ciao {nome},
 
-Ci siamo imbattuti nella tua attività mentre cercavamo realtà interessanti nella zona — e la tua ci ha colpito. Si vede la cura che ci hai messo e la qualità del lavoro, soprattutto vedendo i tuoi competitor.
+Ci siamo imbattuti nella tua attivita mentre cercavamo realta interessanti nella zona — e la tua ci ha colpito. Si vede la cura che ci hai messo e la qualita del lavoro, soprattutto vedendo i tuoi competitor.
 
-L'unica cosa è che una bella attività senza la comunicazione giusta rischia di restare invisibile — e di perdere clienti che avrebbero scelto te.
+L'unica cosa e che una bella attivita senza la comunicazione giusta rischia di restare invisibile — e di perdere clienti che avrebbero scelto te.
 
 Ti mando questa email con l'intento di darti una mano per quanto riguarda la parte comunicativa e visiva.
 
-Ti lascio la nostra brochure e il sito, magari può essere uno spunto interessante:
-- Brochure: {LINK_BROCHURE}
-- Sito: {LINK_SITO}
+Ti lascio il nostro sito, magari puo essere uno spunto interessante:
+{LINK_SITO}
 
 Se ti va, siamo disponibili per una chiamata conoscitiva — senza impegno, per capire se, e in che modo, possiamo darti una mano!
 
 Fabio
 Easy Graphic
 
-351 994 3497
+Tel: 351 994 3497
 WhatsApp: {WHATSAPP_URL}
-{LINK_SITO}
+Sito: {LINK_SITO}
 """
     return oggetto, corpo_html, corpo_testo
-
 def manda_email(destinatario, nome_attivita, nicchia=''):
     """Manda email al potenziale cliente. Ritorna True se successo."""
     if not GMAIL_USER or not GMAIL_PASSWORD:
