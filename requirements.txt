@@ -1,1 +1,3 @@
+outscraper==2.1.0
+firebase-admin==6.5.0
 requests==2.31.0
