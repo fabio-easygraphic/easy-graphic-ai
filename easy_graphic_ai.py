@@ -1,389 +1,325 @@
 #!/usr/bin/env python3
 """
-Easy Graphic AI Lead Scraper + Email Sender
-1. Cerca attività su Google Maps
-2. Manda email commerciale al potenziale cliente
-3. Dopo 24h lo mette nella dashboard (emaillist)
+Easy Graphic AI — Bot email outreach
+Cerca attività su Google Maps, manda email con proposta sito gratuito,
+salva in Firebase Firestore per il CRM.
+
+ENV vars su Render:
+  OUTSCRAPER_KEY   → chiave API Outscraper
+  GMAIL_USER       → email mittente (es. a.f.easygraphic@gmail.com)
+  GMAIL_PASSWORD   → password app Gmail (non la password normale)
+  LINK_SITO        → https://easy-graphic.it
 """
-import os, json, time, requests, datetime, smtplib
+
+import os, json, time, smtplib, logging
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
+from datetime import datetime, timedelta
+import requests
 
-# ── CONFIG ────────────────────────────────────────────────────────
-OUTSCRAPER_KEY  = os.environ.get('OUTSCRAPER_KEY', '')
-GMAIL_USER      = os.environ.get('GMAIL_USER', '')
-GMAIL_PASSWORD  = os.environ.get('GMAIL_PASSWORD', '')
-FIREBASE_PROJECT = 'easy-graphic-8a7eb'
-FIREBASE_URL    = f'https://firestore.googleapis.com/v1/projects/{FIREBASE_PROJECT}/databases/(default)/documents'
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+log = logging.getLogger(__name__)
 
-# Link da aggiornare quando pronti
+# ── CONFIG ──────────────────────────────────────────────────────
+CHIAVE_SCRAPER = os.environ.get('OUTSCRAPER_KEY', '')
+UTENTE_GMAIL   = os.environ.get('GMAIL_USER', '')
+PASSWORD_GMAIL = os.environ.get('GMAIL_PASSWORD', '')
+PROGETTO_FIREBASE = 'easy-graphic-8a7eb'
+URL_FIREBASE   = f'https://firestore.googleapis.com/v1/projects/{PROGETTO_FIREBASE}/databases/(default)/documents'
 LINK_SITO      = os.environ.get('LINK_SITO', 'https://easy-graphic.it')
-LINK_BROCHURE  = os.environ.get('LINK_BROCHURE', 'https://drive.google.com/file/d/1x8QU21kibsTGzoaBCzfY9ZHmu-_s9Sb9/view?usp=sharing')
-WHATSAPP_URL   = 'https://wa.me/393519943497'
 
 # Nicchie per collaboratore
 NICCHIE = {
-    'mattia':   'parrucchieri',
-    'jacopo':   'centro estetico',
-    'emanuele': 'consulenti',
-    'fabio':    'impresa edile',
+    'Mattia':   'parrucchiere',
+    'Jacopo':   'centro estetico',
+    'Emanuele': 'consulente',
+    'Fabio':    'impresa edile',
 }
 
-CITTA_NORD = [
-    'Bergamo', 'Milano', 'Torino', 'Brescia', 'Verona',
-    'Bologna', 'Venezia', 'Genova', 'Padova', 'Vicenza',
-    'Modena', 'Parma', 'Reggio Emilia', 'Trento', 'Trieste',
-    'Novara', 'Varese', 'Como', 'Piacenza', 'Udine',
-]
-CITTA_CENTRO = [
-    'Firenze', 'Roma', 'Perugia', 'Ancona', 'Livorno',
-    'Pisa', 'Siena', 'Arezzo', 'Grosseto', 'Viterbo',
-]
-CITTA_SUD = [
-    'Napoli', 'Bari', 'Palermo', 'Catania', 'Messina',
-    'Reggio Calabria', 'Taranto', 'Brindisi', 'Salerno', 'Foggia',
-]
-ALL_CITTA = CITTA_NORD + CITTA_CENTRO + CITTA_SUD
-LEADS_PER_MEMBRO = 25
+# Città — ruota ogni giorno
+CITTA_NORD   = ['Milano', 'Torino', 'Bologna', 'Venezia', 'Genova', 'Verona', 'Padova', 'Brescia', 'Bergamo', 'Modena', 'Parma', 'Trieste', 'Trento']
+CITTA_CENTRO = ['Roma', 'Firenze', 'Ancona', 'Perugia', 'Pescara']
+CITTA_SUD    = ['Napoli', 'Bari', 'Palermo', 'Catania', 'Messina', 'Salerno', 'Catanzaro', 'Foggia', 'Cagliari', 'Sassari']
+ALL_CITTA    = CITTA_NORD + CITTA_CENTRO + CITTA_SUD
 
-# ── EMAIL ─────────────────────────────────────────────────────────
-def nome_breve(nome_attivita, nicchia=''):
-    """Estrae il nome breve dell'attività."""
-    import re
-    n = nome_attivita.strip()
-    n = re.split(r'[-|/(]', n)[0].strip()
-    parole = n.split()
-    if len(parole) > 3:
-        n = ' '.join(parole[:3])
-    return n.strip()
+LEAD_PER_MEMBRO = 30  # lead al giorno per collaboratore
 
-def build_email(nome_attivita, nicchia=''):
-    nome = nome_breve(nome_attivita, nicchia)
-    oggetto = "Comunicazione visiva per la tua attivita"
-    corpo_html = f"""
-<div style="font-family:Arial,sans-serif;max-width:560px;margin:0 auto;color:#222;font-size:15px;line-height:1.8">
-  <p>Buongiorno,</p>
+# ── FIREBASE ────────────────────────────────────────────────────
 
-  <p>Ci siamo imbattuti nella tua attivita mentre cercavamo realta interessanti nella zona — e la tua ci ha colpito.
-  Si vede la cura che ci hai messo e la qualita del lavoro, soprattutto vedendo i tuoi competitor.</p>
+def firebase_get(collection, doc_id):
+    url = f"{URL_FIREBASE}/{collection}/{doc_id}"
+    r = requests.get(url, timeout=10)
+    if r.status_code == 200:
+        return r.json()
+    return None
 
-  <p>L'unica cosa e che una bella attivita senza la comunicazione giusta rischia di restare invisibile —
-  e di perdere clienti che avrebbero scelto te.</p>
+def firebase_set(collection, doc_id, data):
+    url = f"{URL_FIREBASE}/{collection}/{doc_id}"
+    fields = {k: _val(v) for k, v in data.items()}
+    r = requests.patch(url, json={"fields": fields}, timeout=10)
+    return r.status_code in (200, 201)
 
-  <p>Ti mando questa email con l'intento di darti una mano per quanto riguarda la parte comunicativa e visiva.</p>
+def firebase_add(collection, data):
+    url = f"{URL_FIREBASE}/{collection}"
+    fields = {k: _val(v) for k, v in data.items()}
+    r = requests.post(url, json={"fields": fields}, timeout=10)
+    return r.status_code in (200, 201)
 
-  <p>Ti lascio il nostro sito, magari puo essere uno spunto interessante, oltre che a capire meglio
-  cio che facciamo.<br>
-  <a href="{LINK_SITO}" style="color:#1A1DE6;font-weight:600">{LINK_SITO}</a></p>
-
-  <p>Se ti va, siamo disponibili per una chiamata conoscitiva — senza impegno, per capire se, e in che modo,
-  possiamo darti una mano!</p>
-
-  <p style="margin-top:28px">
-    <b>Fabio</b><br>
-    <b style="color:#1A1DE6">Easy Graphic</b><br><br>
-    Tel: <a href="tel:+393519943497" style="color:#222">351 994 3497</a><br>
-    WhatsApp: <a href="{WHATSAPP_URL}" style="color:#1A1DE6">Scrivici direttamente</a><br>
-    Sito: <a href="{LINK_SITO}" style="color:#1A1DE6">{LINK_SITO}</a>
-  </p>
-</div>
-"""
-    corpo_testo = f"""Buongiorno,
-
-Ci siamo imbattuti nella tua attivita mentre cercavamo realta interessanti nella zona — e la tua ci ha colpito. Si vede la cura che ci hai messo e la qualita del lavoro, soprattutto vedendo i tuoi competitor.
-
-L'unica cosa e che una bella attivita senza la comunicazione giusta rischia di restare invisibile — e di perdere clienti che avrebbero scelto te.
-
-Ti mando questa email con l'intento di darti una mano per quanto riguarda la parte comunicativa e visiva.
-
-Ti lascio il nostro sito, magari puo essere uno spunto interessante:
-{LINK_SITO}
-
-Se ti va, siamo disponibili per una chiamata conoscitiva — senza impegno, per capire se, e in che modo, possiamo darti una mano!
-
-Fabio
-Easy Graphic
-
-Tel: 351 994 3497
-WhatsApp: {WHATSAPP_URL}
-Sito: {LINK_SITO}
-"""
-    return oggetto, corpo_html, corpo_testo
-def manda_email(destinatario, nome_attivita, nicchia=''):
-    """Manda email al potenziale cliente. Ritorna True se successo."""
-    if not GMAIL_USER or not GMAIL_PASSWORD:
-        print(f'  ⚠️  Gmail non configurato, skip email per {destinatario}')
-        return False
-    if not destinatario or '@' not in destinatario:
-        return False
-
-    try:
-        oggetto, corpo_html, corpo_testo = build_email(nome_attivita, nicchia)
-        msg = MIMEMultipart('alternative')
-        msg['Subject'] = oggetto
-        msg['From']    = GMAIL_USER
-        msg['To']      = destinatario
-        msg.attach(MIMEText(corpo_testo, 'plain', 'utf-8'))
-        msg.attach(MIMEText(corpo_html, 'html', 'utf-8'))
-
-        with smtplib.SMTP_SSL('smtp.gmail.com', 465) as smtp:
-            smtp.login(GMAIL_USER, GMAIL_PASSWORD)
-            smtp.sendmail(GMAIL_USER, destinatario, msg.as_bytes())
-
-        print(f'  ✅ Email inviata a {destinatario}')
-        return True
-    except Exception as e:
-        print(f'  ❌ Errore email {destinatario}: {e}')
-        return False
-
-# ── FIREBASE ──────────────────────────────────────────────────────
-def get_stato():
-    try:
-        r = requests.get(f'{FIREBASE_URL}/ai_stato/progress')
-        if r.status_code == 200:
-            fields = r.json().get('fields', {})
-            return {'citta_index': int(fields.get('citta_index', {}).get('integerValue', 0))}
-    except:
-        pass
-    return {'citta_index': 0}
-
-def save_stato(citta_index):
-    data = {'fields': {
-        'citta_index': {'integerValue': str(citta_index)},
-        'last_run':    {'stringValue': datetime.datetime.now().isoformat()},
+def firebase_query(collection, field, value):
+    url = f"https://firestore.googleapis.com/v1/projects/{PROGETTO_FIREBASE}/databases/(default)/documents:runQuery"
+    body = {"structuredQuery": {
+        "from": [{"collectionId": collection}],
+        "where": {"fieldFilter": {"field": {"fieldPath": field}, "op": "EQUAL", "value": _val(value)}}
     }}
-    requests.patch(f'{FIREBASE_URL}/ai_stato/progress', json=data,
-                   headers={'Content-Type': 'application/json'})
-
-def gia_presente(nome, email):
-    """Controlla se il contatto esiste già in emaillist o leads_pending."""
-    for collection in ['emaillist', 'leads_pending']:
-        try:
-            query = {
-                'structuredQuery': {
-                    'from': [{'collectionId': collection}],
-                    'where': {'fieldFilter': {
-                        'field': {'fieldPath': 'nome'},
-                        'op': 'EQUAL',
-                        'value': {'stringValue': nome}
-                    }},
-                    'limit': 1
-                }
-            }
-            r = requests.post(f'https://firestore.googleapis.com/v1/projects/{FIREBASE_PROJECT}/databases/(default)/documents:runQuery',
-                              json=query, headers={'Content-Type': 'application/json'})
-            if r.status_code == 200:
-                results = r.json()
-                if results and results[0].get('document'):
-                    return True
-        except:
-            pass
-    return False
-
-
-# ── ESTRAI EMAIL DAL SITO ─────────────────────────────────────────
-def estrai_email_da_sito(url):
-    """Cerca email nel sito web dell'attività."""
-    if not url or not url.startswith('http'):
-        return ''
-    try:
-        import re
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (compatible; EasyGraphic/1.0)',
-            'Accept': 'text/html'
-        }
-        r = requests.get(url, headers=headers, timeout=8, allow_redirects=True)
-        if r.status_code != 200:
-            return ''
-        testo = r.text[:50000]  # primi 50kb
-        # Cerca pattern email
-        emails = re.findall(r'[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}', testo)
-        # Filtra email generiche/spam
-        escludi = ['noreply', 'no-reply', 'wordpress', 'sentry', 'example',
-                   'wix', 'squarespace', 'google', 'facebook', 'instagram',
-                   'schema', 'jquery', 'bootstrap', 'cloudflare']
-        for email in emails:
-            email_low = email.lower()
-            if any(e in email_low for e in escludi):
-                continue
-            if len(email) > 60:
-                continue
-            return email.lower()
-    except Exception as e:
-        pass
-    return ''
-
-def salva_pending(attivita, membro_id, nicchia, citta, email_inviata):
-    """Salva in leads_pending con timestamp. Dopo 24h passa a emaillist."""
-    nome      = attivita.get('name', '')
-    telefono  = attivita.get('phone', '')
-    email_az  = attivita.get('email', '')
-    sito      = attivita.get('website', '')
-    indirizzo = attivita.get('full_address', '') or attivita.get('street', '')
-    rating    = str(attivita.get('rating', ''))
-
-    if not nome:
-        return False
-
-    ora = datetime.datetime.now()
-    dashboard_at = (ora + datetime.timedelta(hours=24)).isoformat()
-
-    data = {'fields': {
-        'nome':         {'stringValue': nome},
-        'tel':          {'stringValue': telefono or ''},
-        'email':        {'stringValue': email_az or ''},
-        'sito':         {'stringValue': sito or ''},
-        'indirizzo':    {'stringValue': indirizzo or ''},
-        'citta':        {'stringValue': citta},
-        'nicchia':      {'stringValue': nicchia},
-        'chiusoDa':     {'stringValue': membro_id},
-        'contattato':   {'booleanValue': False},
-        'fonte':        {'stringValue': 'AI'},
-        'rating':       {'stringValue': rating},
-        'data':         {'stringValue': ora.strftime('%d/%m/%Y')},
-        'emailInviata': {'booleanValue': email_inviata},
-        'emailSentAt':  {'stringValue': ora.isoformat()},
-        'dashboardAt':  {'stringValue': dashboard_at},
-        'ts':           {'integerValue': str(int(time.time() * 1000))},
-    }}
-
-    r = requests.post(f'{FIREBASE_URL}/leads_pending', json=data,
-                      headers={'Content-Type': 'application/json'})
-    return r.status_code == 200
-
-def promuovi_pending():
-    """Sposta da leads_pending a emaillist i contatti con dashboardAt passato."""
-    print('\n── Promuovo leads_pending → emaillist ──')
-    ora = datetime.datetime.now()
-
-    try:
-        r = requests.get(f'{FIREBASE_URL}/leads_pending?pageSize=200')
-        if r.status_code != 200:
-            return
-        docs = r.json().get('documents', [])
-        promossi = 0
-        for doc in docs:
-            fields = doc.get('fields', {})
-            dashboard_at_str = fields.get('dashboardAt', {}).get('stringValue', '')
-            if not dashboard_at_str:
-                continue
-            try:
-                dashboard_at = datetime.datetime.fromisoformat(dashboard_at_str)
-            except:
-                continue
-            if ora >= dashboard_at:
-                # Copia in emaillist
-                new_data = {'fields': {k: v for k, v in fields.items()
-                                        if k not in ['dashboardAt', 'emailSentAt']}}
-                r2 = requests.post(f'{FIREBASE_URL}/emaillist', json=new_data,
-                                   headers={'Content-Type': 'application/json'})
-                if r2.status_code == 200:
-                    # Elimina da pending
-                    doc_id = doc['name'].split('/')[-1]
-                    requests.delete(f'{FIREBASE_URL}/leads_pending/{doc_id}')
-                    promossi += 1
-        print(f'  Promossi: {promossi} contatti')
-    except Exception as e:
-        print(f'  Errore promuovi: {e}')
-
-# ── OUTSCRAPER ────────────────────────────────────────────────────
-def cerca_attivita(nicchia, citta, limit=25):
-    query = f'{nicchia} {citta} Italy'
-    print(f'  Cerco: {query}')
-    try:
-        r = requests.get('https://api.outscraper.com/maps/search-v3',
-            params={'query': query, 'limit': limit, 'async': True},
-            headers={'X-API-KEY': OUTSCRAPER_KEY}, timeout=30)
-        if r.status_code not in [200, 202]:
-            print(f'  Errore Outscraper: {r.status_code}')
-            return []
-        request_id = r.json().get('id', '')
-        if not request_id:
-            # Risposta sincrona diretta
-            data = r.json().get('data', [[]])
-            return data[0] if data else []
-        for attempt in range(12):
-            time.sleep(10)
-            r2 = requests.get(f'https://api.outscraper.com/requests/{request_id}',
-                headers={'X-API-KEY': OUTSCRAPER_KEY}, timeout=30)
-            if r2.status_code == 200:
-                result = r2.json()
-                if result.get('status') == 'Success':
-                    results = result.get('data', [[]])[0]
-                    print(f'  Trovati {len(results)} risultati')
-                    return results
-                elif result.get('status') == 'Pending':
-                    print(f'  In attesa... ({attempt+1}/12)')
-    except Exception as e:
-        print(f'  Errore: {e}')
+    r = requests.post(url, json=body, timeout=10)
+    if r.status_code == 200:
+        return [d['document'] for d in r.json() if 'document' in d]
     return []
 
-# ── MAIN ──────────────────────────────────────────────────────────
-def run():
-    print(f'\n{"="*50}')
-    print(f'Easy Graphic AI — {datetime.datetime.now().strftime("%d/%m/%Y %H:%M")}')
-    print(f'{"="*50}')
+def _val(v):
+    if isinstance(v, bool):   return {"booleanValue": v}
+    if isinstance(v, int):    return {"integerValue": str(v)}
+    if isinstance(v, float):  return {"doubleValue": v}
+    if isinstance(v, str):    return {"stringValue": v}
+    return {"stringValue": str(v)}
 
-    if not OUTSCRAPER_KEY:
-        print('ERRORE: OUTSCRAPER_KEY non configurata!')
-        return
+def _read(fields, key, default=''):
+    f = fields.get(key, {})
+    return f.get('stringValue', f.get('integerValue', f.get('booleanValue', default)))
 
-    # Prima promuovi i pending pronti
-    promuovi_pending()
+# ── STATO BOT ───────────────────────────────────────────────────
 
+def get_stato():
+    doc = firebase_get('ai_stato', 'progress')
+    if doc and 'fields' in doc:
+        f = doc['fields']
+        return {
+            'citta_index': int(_read(f, 'citta_index', 0)),
+        }
+    return {'citta_index': 0}
+
+def save_stato(stato):
+    firebase_set('ai_stato', 'progress', {'citta_index': stato['citta_index']})
+
+# ── OUTSCRAPER ──────────────────────────────────────────────────
+
+def nome_breve(nome_completo):
+    """Estrai solo il nome dell'attività, senza indirizzo."""
+    return nome_completo.split(',')[0].split(' - ')[0].strip() if nome_completo else ''
+
+def cerca_attivita(nicchia, citta, limit=50):
+    """Cerca attività su Google Maps via Outscraper."""
+    if not CHIAVE_SCRAPER:
+        log.error("OUTSCRAPER_KEY non impostata")
+        return []
+    
+    url = "https://api.app.outscraper.com/maps/search-v3"
+    params = {
+        "query": f"{nicchia} {citta} Italia",
+        "limit": limit,
+        "language": "it",
+        "fields": "name,full_address,email,phone,website",
+        "apiKey": CHIAVE_SCRAPER,
+    }
+    try:
+        r = requests.get(url, params=params, timeout=30)
+        r.raise_for_status()
+        data = r.json()
+        results = data.get('data', [])
+        if isinstance(results, list) and results and isinstance(results[0], list):
+            results = results[0]
+        log.info(f"Outscraper: {len(results)} risultati per '{nicchia} {citta}'")
+        return results
+    except Exception as e:
+        log.error(f"Outscraper error: {e}")
+        return []
+
+def estrai_email(attivita):
+    """Estrai email dal risultato Outscraper."""
+    email = attivita.get('email', '') or ''
+    if isinstance(email, list):
+        email = email[0] if email else ''
+    email = str(email).strip().lower()
+    if '@' in email and '.' in email.split('@')[-1]:
+        return email
+    return ''
+
+# ── EMAIL ────────────────────────────────────────────────────────
+
+def build_email(nome_attivita, nicchia, citta, ha_sito=False):
+    """
+    ha_sito=False → attività senza sito web
+    ha_sito=True  → attività con sito già esistente (versione migliorata)
+    """
+
+    if not ha_sito:
+        # ── VARIANTE A: niente sito ──────────────────────────────
+        oggetto = f"Ho preparato una bozza del sito per {nome_attivita}"
+        corpo = f"""Buongiorno,
+
+ho trovato la sua attività online e, guardando come lavorate, ho notato una grande potenzialità che al momento non viene sfruttata: la mancanza di un sito web adeguato.
+
+Non voglio farle perdere tempo, quindi sono andato direttamente al sodo: ho preparato gratuitamente una bozza di come potrebbe essere il sito web di {nome_attivita} — pensata su misura per il settore {nicchia}.
+
+L'idea è semplice: se la bozza le piace, la personalizziamo insieme al 100% e la rendiamo sua. Se non fa per lei, nessun problema — nessun impegno, nessun costo.
+
+Basterebbe una chiamata veloce di 15 minuti per mostrargliela e capire insieme se c'è margine di collaborazione.
+
+Può rispondere a questa email oppure scriverci direttamente su WhatsApp al 351 994 3497 — rispondo personalmente.
+
+Le va?
+
+Fabio — Easy Graphic
+{LINK_SITO} | WhatsApp 351 994 3497
+"""
+
+    else:
+        # ── VARIANTE B: ha già un sito ───────────────────────────
+        oggetto = f"Ho rifatto il sito di {nome_attivita} — vuole vederlo?"
+        corpo = f"""Buongiorno,
+
+ho visitato il sito di {nome_attivita} e, da grafico, ho visto subito diversi margini di miglioramento — soprattutto in termini di design moderno, velocità e resa su mobile.
+
+Così, senza impegno, ho preparato gratuitamente una versione rinnovata: stessa attività, stesso contenuto, ma con una veste grafica più professionale e pensata per convertire meglio i visitatori in clienti.
+
+Se le fa curiosità vederla, bastano 15 minuti in una chiamata veloce — nessun costo, nessun obbligo.
+
+Può rispondere a questa email oppure scriverci direttamente su WhatsApp al 351 994 3497 — rispondo personalmente.
+
+Se poi le piace, la rendiamo sua al 100%.
+
+Le va di darci un'occhiata?
+
+Fabio — Easy Graphic
+{LINK_SITO} | WhatsApp 351 994 3497
+"""
+
+    return oggetto, corpo
+
+def manda_email(destinatario, oggetto, corpo):
+    """Invia email via Gmail SMTP."""
+    if not UTENTE_GMAIL or not PASSWORD_GMAIL:
+        log.error("GMAIL_USER o GMAIL_PASSWORD non impostati")
+        return False
+    try:
+        msg = MIMEMultipart()
+        msg['From']    = UTENTE_GMAIL
+        msg['To']      = destinatario
+        msg['Subject'] = oggetto
+        msg.attach(MIMEText(corpo, 'plain', 'utf-8'))
+        
+        with smtplib.SMTP_SSL('smtp.gmail.com', 465) as s:
+            s.login(UTENTE_GMAIL, PASSWORD_GMAIL)
+            s.sendmail(UTENTE_GMAIL, destinatario, msg.as_string())
+        return True
+    except Exception as e:
+        log.error(f"Email error a {destinatario}: {e}")
+        return False
+
+# ── MAIN ─────────────────────────────────────────────────────────
+
+def main():
+    log.info("=== EASY GRAPHIC AI BOT START ===")
+    
     stato = get_stato()
-    citta_index = stato['citta_index']
-    if citta_index >= len(ALL_CITTA):
-        citta_index = 0
-        print('Completato tutto il giro! Ricomincio da capo.')
-
-    citta = ALL_CITTA[citta_index]
-    print(f'\nCittà corrente: {citta} ({citta_index+1}/{len(ALL_CITTA)})')
-
-    totale_salvati = 0
-    totale_email   = 0
-
-    for membro_id, nicchia in NICCHIE.items():
-        print(f'\n[{membro_id.upper()}] Nicchia: {nicchia}')
-        attivita_list = cerca_attivita(nicchia, citta, LEADS_PER_MEMBRO)
-
-        salvati = 0
-        for a in attivita_list:
-            nome  = a.get('name', '')
-            email = a.get('email', '')
+    citta_idx = stato['citta_index']
+    oggi = datetime.now().strftime('%d/%m/%Y')
+    ts_now = int(time.time() * 1000)
+    ts_domani = ts_now + 86400000  # +24h
+    
+    # Controlla email già mandate oggi (evita riavvii doppi)
+    gia_oggi = firebase_query('leads_pending', 'data_invio', oggi)
+    if len(gia_oggi) >= len(NICCHIE) * LEAD_PER_MEMBRO * 0.5:
+        log.info(f"Bot già eseguito oggi ({len(gia_oggi)} lead), skip.")
+        return
+    
+    totale_inviati = 0
+    
+    for collab, nicchia in NICCHIE.items():
+        citta = ALL_CITTA[citta_idx % len(ALL_CITTA)]
+        log.info(f"[{collab}] nicchia='{nicchia}' città='{citta}'")
+        
+        # Cerca attività
+        attivita = cerca_attivita(nicchia, citta, limit=80)
+        
+        # Email già contattate (evita duplicati)
+        gia_contattati = set()
+        esistenti = firebase_query('emaillist', 'collab', collab)
+        for doc in esistenti:
+            f = doc.get('fields', {})
+            e = _read(f, 'email')
+            if e: gia_contattati.add(e.lower())
+        
+        inviati = 0
+        for a in attivita:
+            if inviati >= LEAD_PER_MEMBRO:
+                break
+            
+            email = estrai_email(a)
+            if not email or email in gia_contattati:
+                continue
+            
+            nome = nome_breve(a.get('name', ''))
             if not nome:
                 continue
-            if gia_presente(nome, email):
-                print(f'  ⏭  Già presente: {nome}')
+            
+            # Determina se ha già un sito
+            sito = str(a.get('website', '') or '').strip()
+            ha_sito = bool(sito and sito.startswith('http') and len(sito) > 10)
+
+            # Manda email (variante diversa in base alla presenza del sito)
+            oggetto, corpo = build_email(nome, nicchia, citta, ha_sito=ha_sito)
+            if not manda_email(email, oggetto, corpo):
                 continue
-            # Cerca email: prima da Outscraper, poi dal sito
-            email_ok = False
-            if not (email and '@' in email):
-                sito = a.get('website', '') or a.get('site', '')
-                if sito:
-                    print(f'  🔍 Cerco email su sito: {sito[:50]}')
-                    email = estrai_email_da_sito(sito)
-                    if email:
-                        print(f'  📧 Email trovata: {email}')
-            if email and '@' in email:
-                email_ok = manda_email(email, nome, nicchia)
-                if email_ok:
-                    totale_email += 1
-                    time.sleep(2)  # pausa tra email
-            # Salva in pending (va in dashboard dopo 24h)
-            if salva_pending(a, membro_id, nicchia, citta, email_ok):
-                salvati += 1
-
-        print(f'  Salvati in pending: {salvati}/{len(attivita_list)}')
-        totale_salvati += salvati
+            
+            gia_contattati.add(email)
+            inviati += 1
+            totale_inviati += 1
+            
+            # Salva in leads_pending (passa in emaillist dopo 24h)
+            firebase_add('leads_pending', {
+                'nome':        nome,
+                'email':       email,
+                'nicchia':     nicchia,
+                'citta':       citta,
+                'collab':      collab,
+                'chiusoDa':    collab.lower(),
+                'data_invio':  oggi,
+                'ts':          ts_now,
+                'promuovi_ts': ts_domani,
+                'esitoChiamata': 'dc',
+                'chiamato':    False,
+                'ha_sito':     ha_sito,
+                'sito_url':    sito if ha_sito else '',
+            })
+            
+            log.info(f"  ✓ Email inviata a {nome} ({email})")
+            time.sleep(2)  # pausa tra invii
+        
+        log.info(f"[{collab}] {inviati} email inviate")
+        citta_idx += 1
         time.sleep(3)
+    
+    # Promuovi leads_pending → emaillist (quelli di ieri)
+    promossi = 0
+    pending = firebase_query('leads_pending', 'esitoChiamata', 'dc')
+    for doc in pending:
+        f = doc.get('fields', {})
+        promuovi_ts = int(_read(f, 'promuovi_ts', 0))
+        if promuovi_ts and promuovi_ts <= ts_now:
+            # Sposta in emaillist
+            data = {k: _read(f, k) for k in ['nome', 'email', 'nicchia', 'citta', 'collab', 'chiusoDa', 'data_invio', 'esitoChiamata']}
+            data['ts'] = ts_now
+            if firebase_add('emaillist', data):
+                # Elimina da leads_pending
+                doc_id = doc.get('name', '').split('/')[-1]
+                requests.delete(f"{URL_FIREBASE}/leads_pending/{doc_id}", timeout=10)
+                promossi += 1
+    
+    # Aggiorna stato (avanza città)
+    save_stato({'citta_index': citta_idx})
+    
+    log.info(f"=== FINE — {totale_inviati} email inviate, {promossi} lead promossi in emaillist ===")
 
-    next_index = citta_index + 1
-    save_stato(next_index)
-
-    print(f'\nRiepilogo: {totale_salvati} contatti salvati, {totale_email} email inviate')
-    prossima = ALL_CITTA[next_index] if next_index < len(ALL_CITTA) else 'Ricomincia da capo'
-    print(f'Prossima città: {prossima}')
-
-if __name__ == '__main__':
-    run()
+if __name__ == "__main__":
+    main()
