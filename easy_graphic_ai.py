@@ -44,7 +44,7 @@ CITTA_SUD = [
     'Reggio Calabria', 'Taranto', 'Brindisi', 'Salerno', 'Foggia',
 ]
 ALL_CITTA = CITTA_NORD + CITTA_CENTRO + CITTA_SUD
-LEADS_PER_MEMBRO = 25
+LEADS_PER_MEMBRO = 12   # 12 a testa, 4 nicchie = 48/giorno
 
 # ── EMAIL ─────────────────────────────────────────────────────────
 FIRMA_HTML = f"""
@@ -271,22 +271,76 @@ def cerca_attivita(nicchia, citta, limit=25):
     print(f'  Cerco: {query}')
     try:
         client = ApiClient(api_key=OUTSCRAPER_KEY)
+        # enrich_data=True estrae le email dai siti web delle attività
         results = client.google_maps_search(
             [query],
             limit=limit,
             language='it',
-            fields=['name', 'phone', 'email', 'website', 'full_address', 'city', 'rating']
+            enrich_data=True
         )
         if results and isinstance(results[0], list):
             print(f'  Trovati {len(results[0])} risultati')
             return results[0]
         print('  0 risultati')
         return results or []
+    except TypeError:
+        # Versione libreria senza enrich_data → fallback con emails_and_contacts
+        try:
+            client = ApiClient(api_key=OUTSCRAPER_KEY)
+            base = client.google_maps_search([query], limit=limit, language='it')
+            rows = base[0] if base and isinstance(base[0], list) else (base or [])
+            # Estrai email dai siti web trovati
+            siti = [r.get('site') or r.get('website') for r in rows if (r.get('site') or r.get('website'))]
+            email_map = {}
+            if siti:
+                contatti = client.emails_and_contacts(siti)
+                for c in contatti:
+                    dom = c.get('query', '')
+                    em = c.get('email', [])
+                    if isinstance(em, list) and em:
+                        email_map[dom] = em[0]
+                    elif isinstance(em, str) and em:
+                        email_map[dom] = em
+            # Inserisci le email trovate nei risultati
+            for r in rows:
+                sito = r.get('site') or r.get('website') or ''
+                for dom, mail in email_map.items():
+                    if dom and (dom in sito or sito in dom):
+                        r['email'] = mail
+                        break
+            print(f'  Trovati {len(rows)} risultati')
+            return rows
+        except Exception as e:
+            print(f'  Errore Outscraper (fallback): {e}')
+            return []
     except Exception as e:
         print(f'  Errore Outscraper: {e}')
         return []
 
 # ── MAIN ──────────────────────────────────────────────────────────
+# Tetto di sicurezza: massimo risultati Outscraper al mese (anti-svuotamento)
+MAX_RISULTATI_MESE = 800   # bot email: ~720 previsti, 800 di margine
+
+def get_contatore_mese():
+    """Legge quanti risultati sono stati scaricati questo mese."""
+    mese = datetime.datetime.now().strftime('%Y-%m')
+    try:
+        r = requests.get(f'{FIREBASE_URL}/ai_contatore/{mese}', timeout=10)
+        if r.status_code == 200:
+            f = r.json().get('fields', {})
+            return int(f.get('count', {}).get('integerValue', 0))
+    except: pass
+    return 0
+
+def add_contatore_mese(n):
+    """Aggiunge n al contatore del mese corrente."""
+    mese = datetime.datetime.now().strftime('%Y-%m')
+    nuovo = get_contatore_mese() + n
+    data = {'fields': {'count': {'integerValue': str(nuovo)}}}
+    requests.patch(f'{FIREBASE_URL}/ai_contatore/{mese}', json=data,
+                   headers={'Content-Type': 'application/json'}, timeout=10)
+    return nuovo
+
 def run():
     print(f'\n{"="*50}')
     print(f'Easy Graphic AI — {datetime.datetime.now().strftime("%d/%m/%Y %H:%M")}')
@@ -295,6 +349,22 @@ def run():
     if not OUTSCRAPER_KEY:
         print('ERRORE: OUTSCRAPER_KEY non configurata!')
         return
+
+    # GIORNI ALTERNI: gira solo nei giorni pari dell'anno
+    giorno_anno = datetime.datetime.now().timetuple().tm_yday
+    if giorno_anno % 2 != 0:
+        print(f'Oggi (giorno {giorno_anno}) il bot email non gira — giorni alterni per risparmio.')
+        # Promuove comunque i pending pronti, poi esce
+        promuovi_pending()
+        return
+
+    # TETTO MENSILE: se superato, stop
+    contatore = get_contatore_mese()
+    if contatore >= MAX_RISULTATI_MESE:
+        print(f'⚠️  Tetto mensile raggiunto ({contatore}/{MAX_RISULTATI_MESE}). Bot fermo per non spendere.')
+        promuovi_pending()
+        return
+    print(f'Risultati questo mese: {contatore}/{MAX_RISULTATI_MESE}')
 
     # Prima promuovi i pending pronti
     promuovi_pending()
@@ -314,6 +384,7 @@ def run():
     for membro_id, nicchia in NICCHIE.items():
         print(f'\n[{membro_id.upper()}] Nicchia: {nicchia}')
         attivita_list = cerca_attivita(nicchia, citta, LEADS_PER_MEMBRO)
+        add_contatore_mese(len(attivita_list))  # traccia spesa
 
         salvati = 0
         for a in attivita_list:
