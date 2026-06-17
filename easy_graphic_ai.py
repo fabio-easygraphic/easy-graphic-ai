@@ -21,13 +21,8 @@ LINK_SITO      = os.environ.get('LINK_SITO', '[LINK SITO - coming soon]')
 LINK_BROCHURE  = os.environ.get('LINK_BROCHURE', '[LINK BROCHURE - coming soon]')
 WHATSAPP_URL   = 'https://wa.me/393934622929'
 
-# Nicchie per collaboratore
-NICCHIE = {
-    'mattia':   'parrucchieri',
-    'jacopo':   'centro estetico',
-    'emanuele': 'consulenti',
-    'fabio':    'centro massaggi',
-}
+# Nicchie da cercare (lead tutti di Fabio)
+NICCHIE = ['parrucchieri', 'centro estetico', 'consulenti', 'centro massaggi']
 
 CITTA_NORD = [
     'Bergamo', 'Milano', 'Torino', 'Brescia', 'Verona',
@@ -190,11 +185,11 @@ def gia_presente(nome, email):
             pass
     return False
 
-def salva_pending(attivita, membro_id, nicchia, citta, email_inviata):
+def salva_pending(attivita, nicchia, citta, email_inviata):
     """Salva in leads_pending con timestamp. Dopo 24h passa a emaillist."""
     nome      = attivita.get('name', '')
     telefono  = attivita.get('phone', '')
-    email_az  = attivita.get('email', '')
+    email_az  = _estrai_email_da_record(attivita)
     sito      = attivita.get('website', '')
     indirizzo = attivita.get('full_address', '') or attivita.get('street', '')
     rating    = str(attivita.get('rating', ''))
@@ -266,53 +261,72 @@ def promuovi_pending():
 # ── OUTSCRAPER (libreria ufficiale) ───────────────────────────────
 from outscraper import ApiClient
 
+def _estrai_email_da_record(r):
+    """Cerca l'email in tutti i campi possibili che Outscraper può usare."""
+    for campo in ('email', 'email_1', 'emails', 'contact_email'):
+        v = r.get(campo)
+        if isinstance(v, list) and v:
+            return str(v[0]).strip()
+        if isinstance(v, str) and '@' in v:
+            return v.strip()
+    return ''
+
 def cerca_attivita(nicchia, citta, limit=25):
     query = f'{nicchia} {citta} Italy'
     print(f'  Cerco: {query}')
     try:
         client = ApiClient(api_key=OUTSCRAPER_KEY)
-        # enrich_data=True estrae le email dai siti web delle attività
-        results = client.google_maps_search(
-            [query],
-            limit=limit,
-            language='it',
-            enrich_data=True
-        )
-        if results and isinstance(results[0], list):
-            print(f'  Trovati {len(results[0])} risultati')
-            return results[0]
-        print('  0 risultati')
-        return results or []
-    except TypeError:
-        # Versione libreria senza enrich_data → fallback con emails_and_contacts
-        try:
-            client = ApiClient(api_key=OUTSCRAPER_KEY)
-            base = client.google_maps_search([query], limit=limit, language='it')
-            rows = base[0] if base and isinstance(base[0], list) else (base or [])
-            # Estrai email dai siti web trovati
-            siti = [r.get('site') or r.get('website') for r in rows if (r.get('site') or r.get('website'))]
-            email_map = {}
-            if siti:
-                contatti = client.emails_and_contacts(siti)
-                for c in contatti:
-                    dom = c.get('query', '')
-                    em = c.get('email', [])
-                    if isinstance(em, list) and em:
-                        email_map[dom] = em[0]
-                    elif isinstance(em, str) and em:
-                        email_map[dom] = em
-            # Inserisci le email trovate nei risultati
-            for r in rows:
-                sito = r.get('site') or r.get('website') or ''
-                for dom, mail in email_map.items():
-                    if dom and (dom in sito or sito in dom):
-                        r['email'] = mail
-                        break
-            print(f'  Trovati {len(rows)} risultati')
-            return rows
-        except Exception as e:
-            print(f'  Errore Outscraper (fallback): {e}')
+        # Step 1: cerca le attività su Google Maps
+        base = client.google_maps_search([query], limit=limit, language='it')
+        rows = base[0] if (base and isinstance(base[0], list)) else (base or [])
+        if not rows:
+            print('  0 risultati')
             return []
+        print(f'  Trovati {len(rows)} risultati')
+
+        # Step 2: raccogli i siti web per estrarre le email
+        siti = []
+        for r in rows:
+            s = r.get('site') or r.get('website') or ''
+            if s and s.startswith('http'):
+                siti.append(s)
+
+        # Step 3: estrai email dai siti (funzione dedicata Outscraper)
+        if siti:
+            try:
+                contatti = client.emails_and_contacts(siti)
+                # mappa dominio → email
+                email_map = {}
+                for c in contatti:
+                    q = c.get('query', '') or c.get('domain', '')
+                    em = c.get('email', []) or c.get('emails', [])
+                    mail = ''
+                    if isinstance(em, list) and em:
+                        # ogni elemento può essere dict {value:...} o stringa
+                        first = em[0]
+                        mail = first.get('value', '') if isinstance(first, dict) else str(first)
+                    elif isinstance(em, str):
+                        mail = em
+                    if q and mail and '@' in mail:
+                        email_map[q] = mail
+                # assegna le email ai record
+                trovate = 0
+                for r in rows:
+                    sito = (r.get('site') or r.get('website') or '').lower()
+                    for dom, mail in email_map.items():
+                        d = (dom or '').lower()
+                        if d and (d in sito or sito in d or d.split('//')[-1].split('/')[0] in sito):
+                            r['email'] = mail
+                            trovate += 1
+                            break
+                print(f'  📧 Email estratte dai siti: {trovate}')
+            except Exception as e:
+                print(f'  ⚠️ Enrichment email fallito: {e}')
+
+        # Conta quante hanno email
+        con_email = sum(1 for r in rows if _estrai_email_da_record(r))
+        print(f'  Totale con email: {con_email}/{len(rows)}')
+        return rows
     except Exception as e:
         print(f'  Errore Outscraper: {e}')
         return []
@@ -381,15 +395,15 @@ def run():
     totale_salvati = 0
     totale_email   = 0
 
-    for membro_id, nicchia in NICCHIE.items():
-        print(f'\n[{membro_id.upper()}] Nicchia: {nicchia}')
+    for nicchia in NICCHIE:
+        print(f'\n[Nicchia: {nicchia}]')
         attivita_list = cerca_attivita(nicchia, citta, LEADS_PER_MEMBRO)
         add_contatore_mese(len(attivita_list))  # traccia spesa
 
         salvati = 0
         for a in attivita_list:
             nome  = a.get('name', '')
-            email = a.get('email', '')
+            email = _estrai_email_da_record(a)
             if not nome:
                 continue
             if gia_presente(nome, email):
@@ -408,7 +422,7 @@ def run():
                     totale_email += 1
                     time.sleep(2)  # pausa tra email
             # Salva in pending (va in dashboard dopo 24h)
-            if salva_pending(a, membro_id, nicchia, citta, email_ok):
+            if salva_pending(a, nicchia, citta, email_ok):
                 salvati += 1
 
         print(f'  Salvati in pending: {salvati}/{len(attivita_list)}')
