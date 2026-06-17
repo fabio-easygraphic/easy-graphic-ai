@@ -213,7 +213,7 @@ def salva_pending(attivita, membro_id, nicchia, citta, email_inviata):
         'indirizzo':    {'stringValue': indirizzo or ''},
         'citta':        {'stringValue': citta},
         'nicchia':      {'stringValue': nicchia},
-        'chiusoDa':     {'stringValue': membro_id},
+        'chiusoDa':     {'stringValue': 'fabio'},  # lead email tutti tuoi
         'contattato':   {'booleanValue': False},
         'fonte':        {'stringValue': 'AI'},
         'rating':       {'stringValue': rating},
